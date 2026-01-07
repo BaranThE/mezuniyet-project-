@@ -4,119 +4,131 @@ import random
 import sqlite3
 from datetime import datetime
 
-# --- VERİ TABANI AYARLARI ---
+# --- 1. VERİ HAVUZU VE ÖZELLİKLER ---
+CAREER_DETAILS = {
+    "teknoloji": {
+        "meslek": "Yazılım Mühendisi",
+        "ozellik": "Analitik düşünme, problem çözme ve sürekli öğrenme odaklı bir kariyer.",
+        "neden": "Verdiğin bilgilere göre teknolojiye yatkınlığın bu alanda fark yaratmanı sağlar."
+    },
+    "tasarim": {
+        "meslek": "UI/UX Tasarımcısı",
+        "ozellik": "Kullanıcı deneyimini iyileştiren, estetik ve fonksiyonelliği birleştiren bir alan.",
+        "neden": "Yaratıcı yönün, dijital dünyada insanlara rehberlik edebilir."
+    },
+    "saglik": {
+        "meslek": "Biyomedikal Mühendisi",
+        "ozellik": "Mühendislik tekniklerini tıp alanındaki sorunları çözmek için kullanma yetisi.",
+        "neden": "Bilime olan ilgin ve yardımseverliğin bu meslekte seni zirveye taşır."
+    },
+    "finans": {
+        "meslek": "Kripto Varlık Analisti",
+        "ozellik": "Dijital piyasaları takip eden, risk yönetimi ve matematiksel modelleme yapan bir uzmanlık.",
+        "neden": "Hızlı karar verme yeteneğin finansal piyasalarda sana avantaj sağlar."
+    }
+}
+
+# --- 2. VERİ TABANI ---
 def init_db():
     conn = sqlite3.connect('kariyer_danismani.db')
     cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS career_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            username TEXT,
-            category TEXT,
-            suggested_career TEXT,
-            timestamp TEXT
-        )
-    ''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, username TEXT, 
+        age TEXT, interests TEXT, suggested TEXT, timestamp TEXT)''')
     conn.commit()
     conn.close()
 
-def save_to_db(user_id, username, category, career):
-    conn = sqlite3.connect('kariyer_danismani.db')
-    cursor = conn.cursor()
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    cursor.execute('''
-        INSERT INTO career_logs (user_id, username, category, suggested_career, timestamp)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, username, category, career, now))
-    conn.commit()
-    conn.close()
+# --- 3. TANIŞMA FORMU (MODAL) ---
+class IntroModal(discord.ui.Modal, title='Kariyer Danışmanı Tanışma Formu'):
+    name = discord.ui.TextInput(label='Adın Soyadın', placeholder='Lütfen buraya yaz...')
+    age = discord.ui.TextInput(label='Yaşın', placeholder='Örn: 22')
+    interests = discord.ui.TextInput(
+        label='İlgi Alanların / Hobilerin', 
+        style=discord.TextStyle.long,
+        placeholder='Nelerden hoşlanırsın? Neleri iyi yaparsın?',
+        max_length=200
+    )
 
-# --- VERİ HAVUZU ---
-CAREER_POOL = {
-    "teknoloji": {"baslik": "🚀 Teknoloji", "meslekler": ["Yazılım Mühendisi", "Veri Bilimci", "Siber Güvenlik"], "color": discord.Color.blue()},
-    "tasarim": {"baslik": "🎨 Tasarım", "meslekler": ["UI/UX Tasarımcısı", "3D Artist", "Oyun Tasarımcısı"], "color": discord.Color.purple()},
-    "saglik": {"baslik": "🏥 Sağlık", "meslekler": ["Biyomedikal Mühendisi", "Genetik Uzmanı"], "color": discord.Color.red()},
-    "finans": {"baslik": "💰 Finans", "meslekler": ["Risk Analisti", "Yatırım Danışmanı"], "color": discord.Color.green()},
-    "hukuk": {"baslik": "⚖️ Hukuk", "meslekler": ["Bilişim Avukatı", "Patent Vekili"], "color": discord.Color.dark_grey()}
-}
-
-class CareerButtonView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    async def handle_selection(self, interaction: discord.Interaction, key: str):
-        data = CAREER_POOL[key]
-        career = random.choice(data["meslekler"])
-        
-        # VERİ TABANINA KAYDET
-        save_to_db(interaction.user.id, str(interaction.user), key, career)
-        
+    async def on_submit(self, interaction: discord.Interaction):
+        # Kullanıcı verilerini aldık, şimdi seçim ekranını gönderiyoruz
+        view = CareerSelectionView(user_info={
+            "name": self.name.value,
+            "age": self.age.value,
+            "interests": self.interests.value
+        })
         embed = discord.Embed(
-            title=data["baslik"],
-            description=f"Önerilen Meslek: **{career}**\n\n*Bu seçim veri tabanına kaydedildi.*",
-            color=data["color"]
+            title=f"Memnun Oldum {self.name.value}!",
+            description=f"Verdiğin bilgileri aldım. Yaşın **{self.age.value}** ve ilgi alanların harika görünüyor.\n\nŞimdi sana en uygun mesleği bulmam için bir **sektör seç**.",
+            color=discord.Color.green()
         )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+# --- 4. SEKTÖR SEÇİMİ VE ANALİZ ---
+class CareerSelectionView(discord.ui.View):
+    def __init__(self, user_info):
+        super().__init__(timeout=None)
+        self.user_info = user_info
+
+    async def suggest_career(self, interaction: discord.Interaction, category: str):
+        data = CAREER_DETAILS[category]
+        
+        # SQL Kaydı
+        conn = sqlite3.connect('kariyer_danismani.db')
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO users (user_id, username, age, interests, suggested, timestamp) VALUES (?,?,?,?,?,?)",
+                       (str(interaction.user.id), self.user_info['name'], self.user_info['age'], 
+                        self.user_info['interests'], data['meslek'], datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        conn.close()
+
+        embed = discord.Embed(title="📊 Kariyer Analiz Sonucu", color=discord.Color.gold())
+        embed.add_field(name="🎯 Tavsiye Edilen Meslek", value=f"**{data['meslek']}**", inline=False)
+        embed.add_field(name="💡 Neden Bu Meslek?", value=data['neden'], inline=False)
+        embed.add_field(name="📜 Mesleğin Özellikleri", value=data['ozellik'], inline=False)
+        embed.set_footer(text=f"Sayın {self.user_info['name']}, bu analiz senin için özel hazırlandı.")
+        
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @discord.ui.button(label="Teknoloji", style=discord.ButtonStyle.primary, custom_id="persistent_tech")
-    async def tech(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_selection(interaction, "teknoloji")
+    @discord.ui.button(label="Teknoloji", style=discord.ButtonStyle.blurple)
+    async def tech(self, interaction: discord.Interaction, btn: discord.ui.Button):
+        await self.suggest_career(interaction, "teknoloji")
 
-    @discord.ui.button(label="Tasarım", style=discord.ButtonStyle.secondary, custom_id="persistent_design")
-    async def design(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_selection(interaction, "tasarim")
+    @discord.ui.button(label="Tasarım", style=discord.ButtonStyle.green)
+    async def design(self, interaction: discord.Interaction, btn: discord.ui.Button):
+        await self.suggest_career(interaction, "tasarim")
 
-    @discord.ui.button(label="Sağlık", style=discord.ButtonStyle.danger, custom_id="persistent_health")
-    async def health(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_selection(interaction, "saglik")
+    @discord.ui.button(label="Sağlık", style=discord.ButtonStyle.red)
+    async def health(self, interaction: discord.Interaction, btn: discord.ui.Button):
+        await self.suggest_career(interaction, "saglik")
 
-    @discord.ui.button(label="Finans", style=discord.ButtonStyle.success, custom_id="persistent_fin")
-    async def finance(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_selection(interaction, "finans")
+# --- 5. ANA BOT KOMUTLARI ---
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-    @discord.ui.button(label="Hukuk", style=discord.ButtonStyle.secondary, custom_id="persistent_law")
-    async def law(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_selection(interaction, "hukuk")
-
-class CareerBot(commands.Bot):
-    def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        super().__init__(command_prefix="!", intents=intents)
-
-    async def setup_hook(self):
-        init_db() # Bot açılırken veri tabanını hazırla
-        self.add_view(CareerButtonView())
-
-    async def on_ready(self):
-        print(f'{self.user} aktif. Veri tabanı bağlandı.')
-
-bot = CareerBot()
+@bot.event
+async def on_ready():
+    init_db()
+    print(f"Bot {bot.user} hazır!")
 
 @bot.command()
 async def kariyer(ctx):
-    view = CareerButtonView()
-    await ctx.send("🎯 Kariyerini belirlemek için bir kategori seç:", view=view)
+    # Kullanıcıya önce tanıtım ve tanışma butonu gönderilir
+    view = discord.ui.View()
+    button = discord.ui.Button(label="Tanışmaya Başla", style=discord.ButtonStyle.primary)
+    
+    async def button_callback(interaction):
+        await interaction.response.send_modal(IntroModal())
+    
+    button.callback = button_callback
+    view.add_item(button)
+    
+    embed = discord.Embed(
+        title="🤖 Kariyer Danışmanına Hoş Geldin",
+        description="Merhaba! Ben senin profesyonel rehberinim. Sana en doğru mesleği önerebilmem için önce seni biraz tanımam gerekiyor.\n\nAşağıdaki butona tıklayarak kendini tanıtmaya başlayabilirsin.",
+        color=discord.Color.blue()
+    )
+    await ctx.send(embed=embed, view=view)
 
-# Admin komutu: Veri tabanını Discord'dan görmek için
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def veriler(ctx):
-    conn = sqlite3.connect('kariyer_danismani.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT username, category, suggested_career FROM career_logs ORDER BY id DESC LIMIT 5')
-    rows = cursor.fetchall()
-    conn.close()
-
-    if not rows:
-        await ctx.send("Henüz kayıtlı veri yok.")
-        return
-
-    mesaj = "**Son 5 Kariyer Sorgusu:**\n"
-    for row in rows:
-        mesaj += f"👤 {row[0]} | 📁 {row[1]} | 💼 {row[2]}\n"
-    await ctx.send(mesaj)
-
-TOKEN = "TOKENİNİ BURAYA GİR LOWW"
+TOKEN = "TOKENİNİ BURAYA GİRRR"
 bot.run(TOKEN)
