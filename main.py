@@ -130,5 +130,5 @@ async def kariyer(ctx):
     )
     await ctx.send(embed=embed, view=view)
 
-TOKEN = "TOKENİNİ BURAYA GİRRR"
+TOKEN = "TOKENİNİZİ BURAYA EKLEYİN"
 bot.run(TOKEN)
